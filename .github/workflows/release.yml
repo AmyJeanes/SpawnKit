@@ -1,0 +1,37 @@
+name: Release to Workshop
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Test the code round-trip + Steam login but skip the actual Workshop upload"
+        type: boolean
+        default: false
+      tag:
+        description: "Preview only: resolve this release tag's notes and log the change note (no login, no upload)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    uses: AmyJeanes/gmod-addon-tools/.github/workflows/publish-workshop.yml@b8aa97c92fd5c867cc9b6cc7a96e8f9de3081734 # v0.31.3
+    with:
+      addon: "SpawnKit"
+      workshop_id: ${{ vars.STABLE_WORKSHOP_ID }}
+      mfa: true
+      dry_run: ${{ github.event.inputs.dry_run == 'true' || vars.STABLE_WORKSHOP_ID == '' }}
+      version: ${{ github.event.release.tag_name }}
+      release_url: ${{ github.event.release.html_url }}
+      release_body: ${{ github.event.release.body }}
+      preview_tag: ${{ github.event.inputs.tag }}
+    secrets:
+      STEAM_USERNAME: ${{ secrets.STEAM_RELEASE_USERNAME }}
+      STEAM_PASSWORD: ${{ secrets.STEAM_RELEASE_PASSWORD }}
+      HA_WEBHOOK_URL: ${{ secrets.HA_WEBHOOK_URL }}
+      NTFY_CI_PASSWORD: ${{ secrets.NTFY_CI_PASSWORD }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.STEAM_WEBHOOK_URL }}

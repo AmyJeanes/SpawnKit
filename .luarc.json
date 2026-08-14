@@ -1,0 +1,16 @@
+{
+    "runtime": {
+        "version": "LuaJIT"
+    },
+    "workspace": {
+        "library": [
+            "./.tools/glua-api"
+        ],
+        "ignoreGlobs": [
+            ".tools/*.zip"
+        ]
+    },
+    "diagnostics": {
+        "disable": []
+    }
+}

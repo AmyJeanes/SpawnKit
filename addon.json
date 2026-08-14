@@ -1,0 +1,14 @@
+{
+	"title": "SpawnKit",
+	"type": "tool",
+	"tags": ["fun", "realism"],
+	"ignore": [
+		".git/*",
+		".github/*",
+		".tools/*",
+		"scripts/*",
+		"*.md",
+		".luarc.json",
+		".gitignore"
+	]
+}
