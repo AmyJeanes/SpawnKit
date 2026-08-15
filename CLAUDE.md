@@ -13,12 +13,12 @@ Loaded in-place at `garrysmod/addons/SpawnKit/`; GMod runs the `lua/` tree at bo
 Three files, one per realm (GMod runs each on the correct realm):
 
 - `lua/autorun/spawnkit.lua` (shared) - the `SpawnKit` table, the `SpawnKitData` / `SpawnKitPreset` types, the caps, the `SpawnKit.Provider` extension hook, and the ammo resolvers (`AmmoType` / `ClipSize` / `AmmoTypes` / `AmmoName`), which read a SWEP's Lua definition or an engine weapon's `scripts/<class>.txt`.
-- `lua/autorun/server/sv_spawnkit.lua` - the authority: the `PlayerLoadout` give, the permission gate (`canSpawn`), live-edit application, per-SteamID64 JSON persistence, presets, and the console commands.
-- `lua/autorun/client/cl_spawnkit.lua` - the Utilities-tab panel (an inline weapon catalogue plus ammo and preset controls, no popup); it fires console commands and renders synced state.
+- `lua/autorun/server/sv_spawnkit.lua` - the authority: the `PlayerLoadout` give, the permission gate (`canSpawn`), live-edit application, per-SteamID64 JSON persistence, presets, the `spawnkit.command` dispatch, and `spawnkit_reload`.
+- `lua/autorun/client/cl_spawnkit.lua` - the Utilities-tab panel (an inline weapon catalogue plus ammo and preset controls, no popup); it drives edits over `spawnkit.command` and renders synced state, and registers the `spawnkit_*` console commands.
 
 ### Data flow
 
-The server is the single source of truth. The panel never edits kit state directly - it runs the `spawnkit_*` console commands (the same interface a console user has); the server validates + persists, then pushes the whole kit back over the `spawnkit.sync` net message. The client requests a sync (`spawnkit.pull`) on spawn and panel build and is otherwise a pure view. Ammo edits are the one client->server-only path (they don't echo back - see `SetAmmo`).
+The server is the single source of truth; the client is a pure view. Edits flow client -> the `spawnkit.command` net message -> a server dispatch table -> the `SpawnKit.*` handlers, which validate + persist then push the whole kit back over `spawnkit.sync`. Both the panel and the client-registered `spawnkit_*` console commands (which exist mainly for autocomplete, cleaning their raw args first) use this one path; the handlers are the sole validators, since a raw net send bypasses the client layer and must never be trusted. `spawnkit_reload` (superadmin) is the one server-only command - it drops the cache so kits re-read from disk, then re-syncs. The client pulls a sync (`spawnkit.pull`) on spawn and panel build. Ammo edits are the one path that doesn't echo back - see `SetAmmo`.
 
 ### Persistence
 

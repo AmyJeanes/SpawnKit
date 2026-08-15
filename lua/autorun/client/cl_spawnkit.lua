@@ -8,6 +8,8 @@ local MARK_DEFAULT = utf8.char(0x2605)
 local AMMO_HIGHLIGHT_ALPHA = 40
 local USED_BY_COLOR = Color(140, 140, 140)
 
+local UNAVAILABLE_CATEGORY = "Unavailable"
+
 -- Declare these internal fields so we can use them without warnings
 ---@class DNumberWang
 ---@field Up DButton
@@ -27,6 +29,57 @@ local function pull()
     net.Start("spawnkit.pull")
     net.SendToServer()
 end
+
+---@param cmd string
+---@param ... string
+local function sendCommand(cmd, ...)
+    ---@type string[]
+    local args = { ... }
+    net.Start("spawnkit.command")
+    net.WriteString(cmd)
+    net.WriteUInt(#args, 8)
+    for _, a in ipairs(args) do net.WriteString(a) end
+    net.SendToServer()
+end
+
+---@param class string
+function SpawnKit.Add(class) sendCommand("add", class) end
+
+function SpawnKit.AddHeld() sendCommand("add_held") end
+
+---@param class string
+function SpawnKit.Remove(class) sendCommand("remove", class) end
+
+---@param class string
+function SpawnKit.SetDefault(class) sendCommand("default", class) end
+
+function SpawnKit.Clear() sendCommand("clear") end
+
+function SpawnKit.SetFromLoadout() sendCommand("set_current") end
+
+---@param on boolean
+function SpawnKit.SetEnabled(on) sendCommand("enabled", on and "1" or "0") end
+
+---@param on boolean
+function SpawnKit.SetLive(on) sendCommand("live", on and "1" or "0") end
+
+---@param on boolean
+function SpawnKit.SetStripDefaults(on) sendCommand("stripdefaults", on and "1" or "0") end
+
+---@param ammoType string
+---@param clips number
+function SpawnKit.SetAmmo(ammoType, clips) sendCommand("ammo", ammoType, tostring(clips)) end
+
+---@param name string
+function SpawnKit.SavePreset(name) sendCommand("preset_save", name) end
+
+---@param name string
+function SpawnKit.LoadPreset(name) sendCommand("preset_load", name) end
+
+---@param name string
+function SpawnKit.DeletePreset(name) sendCommand("preset_delete", name) end
+
+function SpawnKit.PrintKit() sendCommand("list") end
 
 ---@param checkbox DCheckBoxLabel
 ---@param text string
@@ -54,6 +107,20 @@ end
 local function categoryName(raw)
     if not isstring(raw) or raw == "" then return "Other" end
     return language.GetPhrase(raw)
+end
+
+---@param class string
+---@return boolean
+local function isAvailable(class)
+    return SpawnKit.Provider(class) ~= nil or weapons.GetStored(class) ~= nil or istable(list.Get("Weapon")[class])
+end
+
+---@param class string
+---@return string
+local function kitWeaponCategory(class)
+    if not isAvailable(class) then return UNAVAILABLE_CATEGORY end
+    local reg = list.Get("Weapon")[class]
+    return categoryName(reg and reg.Category)
 end
 
 function SpawnKit.BuildCatalog()
@@ -107,7 +174,7 @@ local function wireList(listView)
     listView.DoDoubleClick = function(_, _, line)
         local class = SpawnKit.ClassOf[line]
         if not class then return end
-        RunConsoleCommand(table.HasValue(SpawnKit.MyKit.weapons, class) and "spawnkit_remove" or "spawnkit_add", class)
+        if table.HasValue(SpawnKit.MyKit.weapons, class) then SpawnKit.Remove(class) else SpawnKit.Add(class) end
     end
 
     ---@param line DListView_Line
@@ -118,10 +185,10 @@ local function wireList(listView)
         local isDefault = SpawnKit.MyKit.default == class
         local menu = DermaMenu()
         menu:AddOption(inKit and "Remove from spawn kit" or "Add to spawn kit", function()
-            RunConsoleCommand(inKit and "spawnkit_remove" or "spawnkit_add", class)
+            if inKit then SpawnKit.Remove(class) else SpawnKit.Add(class) end
         end):SetIcon(inKit and "icon16/delete.png" or "icon16/add.png")
         menu:AddOption(isDefault and "Clear default weapon" or "Set as default", function()
-            RunConsoleCommand("spawnkit_default", isDefault and "" or class)
+            SpawnKit.SetDefault(isDefault and "" or class)
         end):SetIcon(isDefault and "icon16/cancel.png" or "icon16/star.png")
         menu:Open()
     end
@@ -161,11 +228,16 @@ function SpawnKit.Repopulate(filter)
         child:SetVisible(false)
         child:Remove()
     end
+    ---@type table<string, DListView_Line>
     SpawnKit.WeaponLines = {}
     ---@type table<DListView_Line, string>
     SpawnKit.ClassOf = {}
     ---@type DListView[]
     SpawnKit.ListViews = {}
+    ---@type table<string, DListView>
+    SpawnKit.WeaponListView = {}
+    ---@type table<DListView, DCollapsibleCategory>
+    SpawnKit.ListViewCategory = {}
     SpawnKit.HighlightAmmo(nil) -- rebuilding the list clears its selection, so drop ammo highlights
 
     local shown, byCat = {}, {}
@@ -182,15 +254,19 @@ function SpawnKit.Repopulate(filter)
     for _, class in ipairs(SpawnKit.MyKit.weapons) do
         if not shown[class] then
             shown[class] = true
-            local reg = list.Get("Weapon")[class]
-            place({ class = class, name = prettyName(class), category = categoryName(reg and reg.Category) })
+            place({ class = class, name = prettyName(class), category = kitWeaponCategory(class) })
         end
     end
 
     -- One collapsible section per non-empty category (alphabetical), weapons sorted by name within
     local cats = {}
     for cat in pairs(byCat) do cats[#cats + 1] = cat end
-    table.sort(cats, function(a, b) return string.lower(a) < string.lower(b) end)
+    table.sort(cats, function(a, b)
+        -- Always put the unavailable category last, others are alphabetical
+        if a == UNAVAILABLE_CATEGORY then return false end
+        if b == UNAVAILABLE_CATEGORY then return true end
+        return string.lower(a) < string.lower(b)
+    end)
     for _, cat in ipairs(cats) do
         local entries = byCat[cat]
         table.sort(entries, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
@@ -207,9 +283,12 @@ function SpawnKit.Repopulate(filter)
             line:SetTooltip(entry.class)
             SpawnKit.ClassOf[line] = entry.class
             SpawnKit.WeaponLines[entry.class] = line
+            SpawnKit.WeaponListView[entry.class] = listView
         end
         listView:SetTall(#entries * listView:GetDataHeight())
-        catList:Add(cat):SetContents(listView)
+        local category = catList:Add(cat)
+        category:SetContents(listView)
+        SpawnKit.ListViewCategory[listView] = category
     end
     SpawnKit.RefreshTicks()
 end
@@ -281,6 +360,37 @@ local function selectedClass()
     end
 end
 
+---@param class string
+local function removeWeaponLine(class)
+    local line = SpawnKit.WeaponLines[class]
+    local lv = SpawnKit.WeaponListView[class]
+    SpawnKit.WeaponLines[class] = nil
+    SpawnKit.WeaponListView[class] = nil
+    if IsValid(line) then SpawnKit.ClassOf[line] = nil end
+    if not IsValid(lv) then return end
+    if IsValid(line) then lv:RemoveLine(line:GetID()) end
+    local category = SpawnKit.ListViewCategory[lv]
+    local remaining = table.Count(lv:GetLines())
+    if remaining == 0 then
+        SpawnKit.ListViewCategory[lv] = nil
+        for i, other in ipairs(SpawnKit.ListViews) do
+            if other == lv then table.remove(SpawnKit.ListViews, i) break end
+        end
+        if IsValid(category) then
+            category:SetVisible(false) -- Remove is deferred to end of frame, hide it now
+            category:Remove()
+        end
+    else
+        local contentTall = remaining * lv:GetDataHeight()
+        lv:SetTall(contentTall)
+        lv:InvalidateLayout(true) -- restack the remaining rows into the gap
+        if IsValid(category) then
+            category:SetTall(category:GetHeaderHeight() + contentTall)
+            category:InvalidateLayout(true)
+        end
+    end
+end
+
 function SpawnKit.Rebuild()
     if IsValid(SpawnKit.EnabledBox) then
         -- Don't trigger when we're updating state, only from real player action
@@ -304,27 +414,24 @@ function SpawnKit.Rebuild()
     local catalog = SpawnKit.CatalogSet or {}
     local lines = SpawnKit.WeaponLines or {}
     local wantSynthetic = {}
-    local structural = false
+    local needRebuild = false
     for _, c in ipairs(SpawnKit.MyKit.weapons) do
         if not catalog[c] then
-            local reg = list.Get("Weapon")[c]
-            if matchesFilter(prettyName(c), c, categoryName(reg and reg.Category), filter) then
+            if matchesFilter(prettyName(c), c, kitWeaponCategory(c), filter) then
                 wantSynthetic[c] = true
-                if not lines[c] then structural = true end
+                if not lines[c] then needRebuild = true end
             end
         end
     end
-    if not structural then
-        for c, line in pairs(lines) do
-            if IsValid(line) and not catalog[c] and not wantSynthetic[c] then
-                structural = true
-                break
-            end
-        end
-    end
-    if structural then
+    if needRebuild then
         SpawnKit.Repopulate(searchText)
     else
+        local toRemove = {}
+        for c, line in pairs(lines) do
+            if IsValid(line) and not catalog[c] and not wantSynthetic[c] then toRemove[#toRemove + 1] = c end
+        end
+        for _, c in ipairs(toRemove) do removeWeaponLine(c) end
+        if #toRemove > 0 and IsValid(SpawnKit.List) then SpawnKit.List:InvalidateLayout(true) end
         SpawnKit.RefreshTicks()
     end
     SpawnKit.HighlightAmmo(selectedClass())
@@ -465,7 +572,7 @@ function SpawnKit.RebuildAmmo()
         wang.OnValueChanged = function(_, val)
             val = math.floor(val)
             ammo[ammoType] = val > 0 and val or nil
-            RunConsoleCommand("spawnkit_ammo", ammoType, tostring(val))
+            SpawnKit.SetAmmo(ammoType, val)
             SpawnKit.UpdatePresetMarker() -- ammo edits don't sync back, so refresh the marker here
         end
 
@@ -531,7 +638,7 @@ function SpawnKit.BuildPanel(panel)
     ---@param val boolean
     enabled.OnChange = function(_, val)
         if SpawnKit.ApplyingEnabled then return end
-        RunConsoleCommand("spawnkit_enabled", val and "1" or "0")
+        SpawnKit.SetEnabled(val)
     end
     panel:AddItem(enabled)
     SpawnKit.EnabledBox = enabled
@@ -543,7 +650,7 @@ function SpawnKit.BuildPanel(panel)
     ---@param val boolean
     live.OnChange = function(_, val)
         if SpawnKit.ApplyingLive then return end
-        RunConsoleCommand("spawnkit_live", val and "1" or "0")
+        SpawnKit.SetLive(val)
     end
     panel:AddItem(live)
     SpawnKit.LiveBox = live
@@ -586,7 +693,7 @@ function SpawnKit.BuildPanel(panel)
     undo:SetEnabled(false)
     undo.DoClick = function()
         local name = SpawnKit.MyKit.activePreset
-        if name then RunConsoleCommand("spawnkit_preset_load", name) end
+        if name then SpawnKit.LoadPreset(name) end
     end
     SpawnKit.PresetRevert = undo
 
@@ -610,21 +717,21 @@ function SpawnKit.BuildPanel(panel)
             Derma_Query("Save your changes to \"" .. active .. "\" before switching to \"" .. value .. "\"?",
                 "Unsaved changes",
                 "Save", function()
-                    RunConsoleCommand("spawnkit_preset_save", active)
-                    RunConsoleCommand("spawnkit_preset_load", value)
+                    SpawnKit.SavePreset(active)
+                    SpawnKit.LoadPreset(value)
                 end,
-                "Discard", function() RunConsoleCommand("spawnkit_preset_load", value) end,
+                "Discard", function() SpawnKit.LoadPreset(value) end,
                 "Cancel")
             return
         end
-        RunConsoleCommand("spawnkit_preset_load", value)
+        SpawnKit.LoadPreset(value)
     end
 
     save.DoClick = function()
         ---@param text string
         local function onConfirm(text)
             text = string.Trim(text or "")
-            if text ~= "" then RunConsoleCommand("spawnkit_preset_save", text) end
+            if text ~= "" then SpawnKit.SavePreset(text) end
         end
         Derma_StringRequest("Save preset", "Enter a name for this preset:", SpawnKit.MyKit.activePreset or "", onConfirm)
     end
@@ -633,7 +740,7 @@ function SpawnKit.BuildPanel(panel)
         local name = SpawnKit.MyKit.activePreset
         if not name then return end
         Derma_Query("Delete the preset \"" .. name .. "\"?", "Delete preset",
-            "Delete", function() RunConsoleCommand("spawnkit_preset_delete", name) end,
+            "Delete", function() SpawnKit.DeletePreset(name) end,
             "Cancel")
     end
 
@@ -645,7 +752,7 @@ function SpawnKit.BuildPanel(panel)
     ---@param val boolean
     strip.OnChange = function(_, val)
         if SpawnKit.ApplyingStrip then return end
-        RunConsoleCommand("spawnkit_stripdefaults", val and "1" or "0")
+        SpawnKit.SetStripDefaults(val)
     end
     panel:AddItem(strip)
     SpawnKit.StripBox = strip
@@ -654,9 +761,9 @@ function SpawnKit.BuildPanel(panel)
     addHeld.DoClick = function()
         local wep = LocalPlayer():GetActiveWeapon()
         if IsValid(wep) and table.HasValue(SpawnKit.MyKit.weapons, wep:GetClass()) then
-            RunConsoleCommand("spawnkit_remove", wep:GetClass())
+            SpawnKit.Remove(wep:GetClass())
         else
-            RunConsoleCommand("spawnkit_add_held")
+            SpawnKit.AddHeld()
         end
     end
     function addHeld:Think()
@@ -667,10 +774,10 @@ function SpawnKit.BuildPanel(panel)
     end
 
     local fromLoadout = panel:Button("Set kit to current loadout")
-    fromLoadout.DoClick = function() RunConsoleCommand("spawnkit_set_current") end
+    fromLoadout.DoClick = function() SpawnKit.SetFromLoadout() end
 
     local clear = panel:Button("Remove all from kit")
-    clear.DoClick = function() RunConsoleCommand("spawnkit_clear") end
+    clear.DoClick = function() SpawnKit.Clear() end
 
     local weaponsForm = vgui.Create("DForm")
     weaponsForm:SetLabel("Weapons")
@@ -811,3 +918,76 @@ hook.Add("InitPostEntity", "SpawnKit.Pull", pull)
 hook.Add("PopulateToolMenu", "SpawnKit", function()
     spawnmenu.AddToolMenuOption("Utilities", "User", "spawnkit", "SpawnKit", "", "", SpawnKit.BuildPanel)
 end)
+
+-- Optional console interface for players who want to script it or use outside of the spawnmenu
+
+---@param cmd string
+---@param argStr string
+---@param classes string[]
+---@return string[]
+local function completeClasses(cmd, argStr, classes)
+    local q = string.lower(string.Trim(argStr or ""))
+    local out = {}
+    for _, class in ipairs(classes) do
+        if q == "" or string.find(string.lower(class), q, 1, true) or string.find(string.lower(prettyName(class)), q, 1, true) then
+            out[#out + 1] = cmd .. " " .. class
+            if #out >= 32 then break end
+        end
+    end
+    return out
+end
+
+---@param cmd string
+---@param argStr string
+---@return string[]
+local function completeCatalog(cmd, argStr)
+    if not SpawnKit.Catalog then SpawnKit.BuildCatalog() end
+    ---@type string[]
+    local classes = {}
+    for _, entry in ipairs(SpawnKit.Catalog or {}) do classes[#classes + 1] = entry.class end
+    return completeClasses(cmd, argStr, classes)
+end
+
+---@param cmd string
+---@param argStr string
+---@return string[]
+local function completeKit(cmd, argStr)
+    return completeClasses(cmd, argStr, SpawnKit.MyKit.weapons or {})
+end
+
+---@param cmd string
+---@param argStr string
+---@return string[]
+local function completePresets(cmd, argStr)
+    local q = string.lower(string.Trim(argStr or ""))
+    local names = {}
+    for n in pairs(SpawnKit.MyKit.presets or {}) do names[#names + 1] = n end
+    table.sort(names, function(a, b) return string.lower(a) < string.lower(b) end)
+    local out = {}
+    for _, n in ipairs(names) do
+        if q == "" or string.find(string.lower(n), q, 1, true) then
+            -- Quote names with spaces so the completion pastes back as one console argument
+            out[#out + 1] = cmd .. " " .. (string.find(n, " ", 1, true) and ('"' .. n .. '"') or n)
+        end
+    end
+    return out
+end
+
+---@param args string[]
+---@return string
+local function joinArgs(args) return table.concat(args, " ") end
+
+concommand.Add("spawnkit_add", function(_, _, args) SpawnKit.Add(joinArgs(args)) end, completeCatalog, "Add a weapon to your spawn kit")
+concommand.Add("spawnkit_add_held", function() SpawnKit.AddHeld() end, nil, "Add the weapon you're holding to your spawn kit")
+concommand.Add("spawnkit_remove", function(_, _, args) SpawnKit.Remove(joinArgs(args)) end, completeKit, "Remove a weapon from your spawn kit")
+concommand.Add("spawnkit_default", function(_, _, args) SpawnKit.SetDefault(joinArgs(args)) end, completeKit, "Set your spawn default weapon (blank clears it)")
+concommand.Add("spawnkit_clear", function() SpawnKit.Clear() end, nil, "Remove all weapons from your spawn kit")
+concommand.Add("spawnkit_set_current", function() SpawnKit.SetFromLoadout() end, nil, "Set your kit to your current loadout")
+concommand.Add("spawnkit_enabled", function(_, _, args) SpawnKit.SetEnabled(tobool(args[1])) end, nil, "Enable (1) or disable (0) your spawn kit")
+concommand.Add("spawnkit_live", function(_, _, args) SpawnKit.SetLive(tobool(args[1])) end, nil, "Apply kit edits immediately (1) or only on spawn (0)")
+concommand.Add("spawnkit_stripdefaults", function(_, _, args) SpawnKit.SetStripDefaults(tobool(args[1])) end, nil, "Remove non-kit default weapons on spawn (1/0)")
+concommand.Add("spawnkit_ammo", function(_, _, args) SpawnKit.SetAmmo(args[1] or "", tonumber(args[2]) or 0) end, nil, "Set extra ammo clips: spawnkit_ammo <ammo type> <clips>")
+concommand.Add("spawnkit_preset_save", function(_, _, args) SpawnKit.SavePreset(joinArgs(args)) end, completePresets, "Save the current kit as a named preset")
+concommand.Add("spawnkit_preset_load", function(_, _, args) SpawnKit.LoadPreset(joinArgs(args)) end, completePresets, "Load a saved preset")
+concommand.Add("spawnkit_preset_delete", function(_, _, args) SpawnKit.DeletePreset(joinArgs(args)) end, completePresets, "Delete a saved preset")
+concommand.Add("spawnkit_list", function() SpawnKit.PrintKit() end, nil, "Print your spawn kit to the console")

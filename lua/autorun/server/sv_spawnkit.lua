@@ -3,6 +3,7 @@ util.AddNetworkString("spawnkit.pull")
 util.AddNetworkString("spawnkit.notify")
 util.AddNetworkString("spawnkit.skipped")
 util.AddNetworkString("spawnkit.suppresspickups")
+util.AddNetworkString("spawnkit.command")
 
 local DATA_DIR = "spawnkit"
 
@@ -219,7 +220,13 @@ end
 ---@param token string?
 local function giveWeapon(ply, class, token)
     local provider = SpawnKit.Provider(class)
-    if provider then provider.give(ply, token) else ply:Give(class) end
+    if provider then
+        provider.give(ply, token)
+    -- Skip unknown weapons but keep them in the kit as they may come back later
+    -- e.g. if an addon is temporarily uninstalled or disabled
+    elseif isKnownWeapon(class) then
+        ply:Give(class)
+    end
 end
 
 -- A list of stripped weapons when strip defaults is on, so we can restore them if it's turned off
@@ -894,84 +901,70 @@ net.Receive("spawnkit.pull", function(_, ply)
     if IsValid(ply) then sync(ply) end
 end)
 
--- Console interface, the Utilities panel drives these underneath
-concommand.Add("spawnkit_add", function(ply, _, args)
-    if IsValid(ply) then SpawnKit.Add(ply, args[1]) end
-end)
-
-concommand.Add("spawnkit_add_held", function(ply)
-    if not IsValid(ply) then return end
-    local wep = ply:GetActiveWeapon()
-    if IsValid(wep) then
-        SpawnKit.Add(ply, wep:GetClass())
-    else
-        notify(ply, "You aren't holding any weapons to add")
-    end
-end)
-
-concommand.Add("spawnkit_remove", function(ply, _, args)
-    if IsValid(ply) then SpawnKit.Remove(ply, args[1]) end
-end)
-
-concommand.Add("spawnkit_default", function(ply, _, args)
-    if IsValid(ply) then SpawnKit.SetDefault(ply, args[1]) end
-end)
-
-concommand.Add("spawnkit_clear", function(ply)
-    if IsValid(ply) then SpawnKit.Clear(ply) end
-end)
-
-concommand.Add("spawnkit_set_current", function(ply)
-    if IsValid(ply) then SpawnKit.SetFromLoadout(ply) end
-end)
-
-concommand.Add("spawnkit_enabled", function(ply, _, args)
-    if IsValid(ply) then SpawnKit.SetEnabled(ply, tobool(args[1])) end
-end)
-
-concommand.Add("spawnkit_live", function(ply, _, args)
-    if IsValid(ply) then SpawnKit.SetLive(ply, tobool(args[1])) end
-end)
-
-concommand.Add("spawnkit_stripdefaults", function(ply, _, args)
-    if IsValid(ply) then SpawnKit.SetStripDefaults(ply, tobool(args[1])) end
-end)
-
-concommand.Add("spawnkit_ammo", function(ply, _, args)
-    if IsValid(ply) then SpawnKit.SetAmmo(ply, args[1], tonumber(args[2]) or 0) end
-end)
-
--- Preset name may contain spaces, concat rejoins split/quoted args
-concommand.Add("spawnkit_preset_save", function(ply, _, args)
-    if IsValid(ply) then SpawnKit.SavePreset(ply, table.concat(args, " ")) end
-end)
-
-concommand.Add("spawnkit_preset_load", function(ply, _, args)
-    if IsValid(ply) then SpawnKit.LoadPreset(ply, table.concat(args, " ")) end
-end)
-
-concommand.Add("spawnkit_preset_delete", function(ply, _, args)
-    if IsValid(ply) then SpawnKit.DeletePreset(ply, table.concat(args, " ")) end
-end)
-
-concommand.Add("spawnkit_list", function(ply)
-    if not IsValid(ply) then return end
-    local kit = SpawnKit.GetKit(ply)
-    ply:PrintMessage(HUD_PRINTCONSOLE, "SpawnKit (" .. (kit.enabled and "enabled" or "disabled") .. "):")
-    if #kit.weapons == 0 then
-        ply:PrintMessage(HUD_PRINTCONSOLE, "  (no weapons)")
-    else
-        for i, class in ipairs(kit.weapons) do
-            ply:PrintMessage(HUD_PRINTCONSOLE, "  " .. i .. ". " .. class .. (kit.default == class and "  (default)" or ""))
+---@type table<string, fun(ply: Player, args: string[])>
+local COMMANDS = {
+    add = function(ply, args) SpawnKit.Add(ply, args[1]) end,
+    add_held = function(ply)
+        local wep = ply:GetActiveWeapon()
+        if IsValid(wep) then SpawnKit.Add(ply, wep:GetClass()) else notify(ply, "You aren't holding any weapons to add") end
+    end,
+    remove = function(ply, args) SpawnKit.Remove(ply, args[1]) end,
+    default = function(ply, args) SpawnKit.SetDefault(ply, args[1]) end,
+    clear = function(ply) SpawnKit.Clear(ply) end,
+    set_current = function(ply) SpawnKit.SetFromLoadout(ply) end,
+    enabled = function(ply, args) SpawnKit.SetEnabled(ply, tobool(args[1])) end,
+    live = function(ply, args) SpawnKit.SetLive(ply, tobool(args[1])) end,
+    stripdefaults = function(ply, args) SpawnKit.SetStripDefaults(ply, tobool(args[1])) end,
+    ammo = function(ply, args) SpawnKit.SetAmmo(ply, args[1], tonumber(args[2]) or 0) end,
+    preset_save = function(ply, args) SpawnKit.SavePreset(ply, args[1]) end,
+    preset_load = function(ply, args) SpawnKit.LoadPreset(ply, args[1]) end,
+    preset_delete = function(ply, args) SpawnKit.DeletePreset(ply, args[1]) end,
+    list = function(ply)
+        local kit = SpawnKit.GetKit(ply)
+        ply:PrintMessage(HUD_PRINTCONSOLE, "SpawnKit (" .. (kit.enabled and "enabled" or "disabled") .. "):")
+        if #kit.weapons == 0 then
+            ply:PrintMessage(HUD_PRINTCONSOLE, "  (no weapons)")
+        else
+            for i, class in ipairs(kit.weapons) do
+                ply:PrintMessage(HUD_PRINTCONSOLE, "  " .. i .. ". " .. class .. (kit.default == class and "  (default)" or ""))
+            end
         end
-    end
-    local names = {}
-    for n in pairs(kit.presets) do names[#names + 1] = n end
-    table.sort(names)
-    if #names > 0 then
-        ply:PrintMessage(HUD_PRINTCONSOLE, "Presets:")
-        for _, n in ipairs(names) do
-            ply:PrintMessage(HUD_PRINTCONSOLE, "  - " .. n .. (kit.activePreset == n and "  (active)" or ""))
+        local names = {}
+        for n in pairs(kit.presets) do names[#names + 1] = n end
+        table.sort(names)
+        if #names > 0 then
+            ply:PrintMessage(HUD_PRINTCONSOLE, "Presets:")
+            for _, n in ipairs(names) do
+                ply:PrintMessage(HUD_PRINTCONSOLE, "  - " .. n .. (kit.activePreset == n and "  (active)" or ""))
+            end
         end
+    end,
+}
+
+net.Receive("spawnkit.command", function(_, ply)
+    if not IsValid(ply) then return end
+    local handler = COMMANDS[net.ReadString()]
+    if not handler then return end
+    ---@type string[]
+    local args = {}
+    for i = 1, math.min(net.ReadUInt(8), 32) do args[i] = net.ReadString() end
+    handler(ply, args)
+end)
+
+concommand.Add("spawnkit_reload", function(ply)
+    if IsValid(ply) and not ply:IsSuperAdmin() then
+        notify(ply, "spawnkit_reload requires superadmin")
+        return
     end
+    SpawnKit.Kits = {}
+    local humans = player.GetHumans()
+    for _, p in ipairs(humans) do
+        saveDeadline[p] = nil
+        sync(p)
+    end
+    local msg = "[SpawnKit] Reloaded kits from disk for " .. #humans .. " player(s)"
+    if IsValid(ply) and not ply:IsListenServerHost() then
+        ply:PrintMessage(HUD_PRINTCONSOLE, msg)
+    end
+    print(msg)
 end)
