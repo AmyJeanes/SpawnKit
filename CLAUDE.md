@@ -12,7 +12,7 @@ Loaded in-place at `garrysmod/addons/SpawnKit/`; GMod runs the `lua/` tree at bo
 
 Three files, one per realm (GMod runs each on the correct realm):
 
-- `lua/autorun/spawnkit.lua` (shared) - the `SpawnKit` table, the `SpawnKitData` / `SpawnKitPreset` types, the caps, the `SpawnKit.Provider` extension hook, and the ammo resolvers (`AmmoType` / `ClipSize` / `AmmoTypes` / `AmmoName`), which read a SWEP's Lua definition or an engine weapon's `scripts/<class>.txt`.
+- `lua/autorun/spawnkit.lua` (shared) - the `SpawnKit` table, the `SpawnKitData` / `SpawnKitPreset` types, the caps, the `SpawnKit.Provider` extension hook, and the ammo resolvers (`NormalizeAmmoType` / `AmmoTypes` / `AmmoName`), which read a SWEP's Lua definition or an engine weapon's `scripts/<class>.txt`.
 - `lua/autorun/server/sv_spawnkit.lua` - the authority: the `PlayerLoadout` give, the permission gate (`canSpawn`), live-edit application, per-SteamID64 JSON persistence, presets, the `spawnkit.command` dispatch, and `spawnkit_reload`.
 - `lua/autorun/client/cl_spawnkit.lua` - the Utilities-tab panel (an inline weapon catalogue plus ammo and preset controls, no popup); it drives edits over `spawnkit.command` and renders synced state, and registers the `spawnkit_*` console commands.
 
