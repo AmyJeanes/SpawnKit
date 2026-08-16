@@ -6,6 +6,7 @@
 		".git/*",
 		".github/*",
 		".tools/*",
+		".vscode/*",
 		"scripts/*",
 		"*.md",
 		".luarc.json",
