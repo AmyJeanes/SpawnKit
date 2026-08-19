@@ -241,7 +241,11 @@ function SpawnKit.Repopulate(filter)
     SpawnKit.HighlightAmmo(nil) -- rebuilding the list clears its selection, so drop ammo highlights
 
     local shown, byCat = {}, {}
-    ---@param entry table
+    ---@class spawnkit_entry
+    ---@field class string
+    ---@field name string
+    ---@field category string
+    ---@param entry spawnkit_entry
     local function place(entry)
         if not matchesFilter(entry.name, entry.class, entry.category, filter) then return end
         byCat[entry.category] = byCat[entry.category] or {}
@@ -259,6 +263,7 @@ function SpawnKit.Repopulate(filter)
     end
 
     -- One collapsible section per non-empty category (alphabetical), weapons sorted by name within
+    ---@type string[]
     local cats = {}
     for cat in pairs(byCat) do cats[#cats + 1] = cat end
     table.sort(cats, function(a, b)
@@ -342,6 +347,7 @@ function SpawnKit.RefreshPresets()
     local combo = SpawnKit.PresetBox
     if not IsValid(combo) then return end
     combo:Clear()
+    ---@type string[]
     local names = {}
     for n in pairs(SpawnKit.MyKit.presets or {}) do names[#names + 1] = n end
     table.sort(names, function(a, b) return string.lower(a) < string.lower(b) end)
@@ -412,6 +418,7 @@ function SpawnKit.Rebuild()
     local searchText = IsValid(SpawnKit.Search) and SpawnKit.Search:GetText() or ""
     local filter = string.lower(searchText)
     local catalog = SpawnKit.CatalogSet or {}
+    ---@type table<string, DListView_Line>
     local lines = SpawnKit.WeaponLines or {}
     local wantSynthetic = {}
     local needRebuild = false
@@ -426,6 +433,7 @@ function SpawnKit.Rebuild()
     if needRebuild then
         SpawnKit.Repopulate(searchText)
     else
+        ---@type string[]
         local toRemove = {}
         for c, line in pairs(lines) do
             if IsValid(line) and not catalog[c] and not wantSynthetic[c] then toRemove[#toRemove + 1] = c end
@@ -960,6 +968,7 @@ end
 ---@return string[]
 local function completePresets(cmd, argStr)
     local q = string.lower(string.Trim(argStr or ""))
+    ---@type string[]
     local names = {}
     for n in pairs(SpawnKit.MyKit.presets or {}) do names[#names + 1] = n end
     table.sort(names, function(a, b) return string.lower(a) < string.lower(b) end)
