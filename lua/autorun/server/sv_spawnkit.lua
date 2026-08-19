@@ -240,9 +240,6 @@ local function stripToKit(ply, kit)
     for _, class in ipairs(kit.weapons) do keep[class] = true end
     local removed = strippedDefaults[ply] or {}
     strippedDefaults[ply] = removed
-    -- glua_ls 1.1.2: Player:GetWeapons is typed as `table` instead of `Weapon[]`
-    -- fixed on wiki now, waiting for regenerated annotations to remove this type hint
-    ---@type Weapon[]
     local weps = ply:GetWeapons()
     for _, weapon in ipairs(weps) do
         local class = weapon:GetClass()
@@ -317,9 +314,6 @@ end
 ---@param except table<string, boolean>
 ---@return boolean
 local function heldUsesAmmo(ply, ammoType, except)
-    -- glua_ls 1.1.2: Player:GetWeapons is typed as `table` instead of `Weapon[]`
-    -- fixed on wiki now, waiting for regenerated annotations to remove this type hint
-    ---@type Weapon[]
     local weps = ply:GetWeapons()
     for _, weapon in ipairs(weps) do
         local class = weapon:GetClass()
@@ -550,9 +544,6 @@ function SpawnKit.SetFromLoadout(ply)
     ---@type string[]
     local kept = {}
     local skipped = {}
-    -- glua_ls 1.1.2: Player:GetWeapons is typed as `table` instead of `Weapon[]`
-    -- fixed on wiki now, waiting for regenerated annotations to remove this type hint
-    ---@type Weapon[]
     local weps = ply:GetWeapons()
     for _, weapon in ipairs(weps) do
         local class = weapon:GetClass()
