@@ -1,0 +1,117 @@
+# AGENTS.md
+
+Shared agent guidance for this repository.
+
+## What this is
+
+**SpawnKit** is a small Garry's Mod (Lua) addon: each player picks a personal set of weapons/SWEPs (with optional per-ammo-type clip amounts and a default weapon auto-equipped on spawn), given to them automatically on every spawn, layered on top of the normal sandbox loadout. Configured from a panel under the spawnmenu's **Utilities** tab (or via console commands), stored per-SteamID64, and saveable as named presets.
+
+Loaded in-place at `garrysmod/addons/SpawnKit/`; GMod runs the `lua/` tree at boot, so there's no build step. New files need a full game restart (the autorun scanner runs once).
+
+## Architecture
+
+Three files, one per realm (GMod runs each on the correct realm):
+
+- `lua/autorun/spawnkit.lua` (shared) - the `SpawnKit` table, the `SpawnKitData` / `SpawnKitPreset` types, the caps, the `SpawnKit.Provider` extension hook, and the ammo resolvers (`NormalizeAmmoType` / `AmmoTypes` / `AmmoName`), which read a SWEP's Lua definition or an engine weapon's `scripts/<class>.txt`.
+- `lua/autorun/server/sv_spawnkit.lua` - the authority: the `PlayerLoadout` give, the permission gate (`canSpawn`), live-edit application, per-SteamID64 JSON persistence, presets, the `spawnkit.command` dispatch, and `spawnkit_reload`.
+- `lua/autorun/client/cl_spawnkit.lua` - the Utilities-tab panel (an inline weapon catalogue plus ammo and preset controls, no popup); it drives edits over `spawnkit.command` and renders synced state, and registers the `spawnkit_*` console commands.
+
+### Data flow
+
+The server is the single source of truth; the client is a pure view. Edits flow client -> the `spawnkit.command` net message -> a server dispatch table -> the `SpawnKit.*` handlers, which validate + persist then push the whole kit back over `spawnkit.sync`. Both the panel and the client-registered `spawnkit_*` console commands (which exist mainly for autocomplete, cleaning their raw args first) use this one path; the handlers are the sole validators, since a raw net send bypasses the client layer and must never be trusted. `spawnkit_reload` (superadmin) is the one server-only command - it drops the cache so kits re-read from disk, then re-syncs. The client pulls a sync (`spawnkit.pull`) on spawn and panel build. Ammo edits are the one path that doesn't echo back - see `SetAmmo`.
+
+### Persistence
+
+Per-player JSON at `data/spawnkit/<steamid64>.json`, cached in `SpawnKit.Kits` by SteamID64; bots and id-less players get an in-memory kit only. Writes are debounced through a `Think` flush.
+
+### Extending: custom-give weapons
+
+A weapon that can't be `ply:Give()`n normally (a non-spawnable variant SWEP) opts in by declaring a `SWEP.SpawnKit = { give = ..., canGive? = ... }` table; SpawnKit reads it lazily via `SpawnKit.Provider`, so neither addon references the other at load time. SpawnKit's own code stays consumer-agnostic. See the `SpawnKitProvider` class in `spawnkit.lua`.
+
+## Non-obvious details
+
+The load-bearing gotchas live as comments beside the code they explain - the deferred one-tick give (`applyKit`), the AdminOnly gate (`canSpawn`), dynamic ammo resolution incl. Half-Life: Source (`weaponAmmo` in `spawnkit.lua`), the live-edit ammo delta tally (`givenAmmo` / `reconcileLive`), bot SteamID64 detection, and the Derma panel quirks. Read those before changing the give / ammo / live paths.
+
+## Build / publish
+
+No local build step. CI (`.github/workflows/ci.yml`) runs GLua Check + Typing Check, then a beta Workshop publish on push to `main`; `release.yml` publishes stable on a GitHub release. Both publish paths dry-run until the Workshop items exist - set repo vars `BETA_WORKSHOP_ID` / `STABLE_WORKSHOP_ID` (and the shared Steam secrets) once created.
+
+<!-- >>> GENERATED shared conventions (gmod-addon-tools) - do not edit; regen: scripts/generate-agent-guidance.ps1 >>> -->
+
+_Shared conventions for my GMod addons - generated from [`gmod-addon-tools/docs/gmod-addon-conventions.md`](https://github.com/AmyJeanes/gmod-addon-tools/blob/main/docs/gmod-addon-conventions.md). Edit it there, not in this file; the block below is overwritten by CI. Addon-specific guidance lives outside the markers._
+
+## Code style
+
+- **Pure Lua syntax only - no GMod-Lua extensions.** No `//` comments, no `continue`, no `!=`, no `&&`/`||`. Use `--`, `goto skip` (`continue` is a reserved word even as a `goto` label, so `goto continue` fails at load), `~=`, `and`/`or`.
+- **Comments: concise, the _why_ not the _what_.** A couple of lines at most; reserve length for genuinely non-obvious rationale and bias toward cutting - match the surrounding density, don't pad to essay length. Don't restate the code, don't explain it by what it replaced, and keep the _why_ self-contained (no pointers to external docs or fragile cross-file references). Keep comments ASCII: `->` not an arrow, a single spaced hyphen for a dash (never a double `--`, which reads as a second comment marker, nor an em-dash).
+- **Drop the loop variable you don't use** rather than naming it: `for _, v in pairs(t)`, `for k in pairs(t)`, `for _ = 1, n do`. The `unused` lint is on - keep the noise floor at zero.
+- **Every `---@diagnostic disable` needs a paired reason** on the same or preceding line naming _why_ the rule is suppressed. The default is to fix the issue, not suppress it.
+- **If that reason is an analyzer or annotations defect rather than our code, start it `glua_ls <version>:`** - and do the same for a `---@cast` / `---@type` / `--[[@as]]` that only exists to work around one. `grep -rn "glua_ls <version>"` is then the complete list to re-test on a toolchain bump, and anything unmarked is a genuine local decision. Without it there is no way to tell the two apart, and a workaround outlives the bug it was written for.
+
+## First-time setup (before touching `.lua` files)
+
+The tooling (`glua_check`, `glua_ls`, the GLua API stubs, and the wiki/typing type-model) is provisioned by the shared [`gmod-addon-tools`](https://github.com/AmyJeanes/gmod-addon-tools) module, cloned **beside this addon**. `scripts/install-tools.ps1` is a thin wrapper - `scripts/bootstrap.ps1` resolves the sibling module and it calls `Initialize-GmodTools`, so the version pins live once in the module and every addon runs the exact same engine.
+
+```bash
+git clone https://github.com/AmyJeanes/gmod-addon-tools ../gmod-addon-tools
+pwsh -File scripts/install-tools.ps1
+```
+
+It is idempotent - re-running is a no-op when the pinned versions are already present, so it is also the recovery path when diagnostics look wrong. In Claude Code, run `/reload-plugins` after a fresh install so the live LSP restarts against the new binary. Codex does not need a reload because it uses the project-local tools for explicit checks rather than a live LSP session.
+
+### `.luarc.json` library entries
+
+Reference a sibling's subdirectories - `../Doors/lua` **and** `../Doors/.luatypes` - never `../Doors` itself. Each addon provisions its own `.tools/glua-api`, so a root entry loads the annotations twice, which breaks `@return_cast` narrowing and misreports types at sites with no visible link to libraries ([gmod-glua-ls#48](https://github.com/Pollux12/gmod-glua-ls/issues/48)). Omitting a sibling's `.luatypes` silently drops its type overrides. `Initialize-GmodTools` fails on both.
+
+### `.luatypes` files must abort if executed
+
+They declare real globals and functions with empty bodies (`CPPI = {}`, `function debug.getinfo(...) end`), so executing one replaces working code with stubs. Living outside `lua/` is what keeps them unreachable - the game mounts, and `gmad` packs, from a fixed folder whitelist - so leave them there. Each also carries a guard as its first executable line, which `Initialize-GmodTools` enforces and the analyzer ignores:
+
+```lua
+error("cppi.lua contains type annotations only and must never be executed")
+```
+
+## GLua analyzer integration (`glua-lsp` plugin)
+
+The [`glua-lsp` plugin](https://github.com/AmyJeanes/gmod-agent-plugins) distributes the shared GLua setup and recovery skills to Claude Code and Codex. Both agents use the same project-local [`glua_ls`](https://github.com/Pollux12/gmod-glua-ls), `glua_check`, and API stubs under `.tools/`; no global install or PATH plumbing is required.
+
+Claude Code also uses the plugin for live diagnostics, hover, and jump-to-definition. Diagnostics arrive automatically after every edit. `.claude/settings.json` declares the `gmod-agent-plugins` marketplace so contributors are prompted to install it on first open, and the plugin resolves `glua_ls` from this project's `.tools/bin/` when it launches. Codex does not currently expose a live LSP integration, so use `scripts/glua-check.ps1` for repository diagnostics there. The `glua-lsp:install-glua-ls` skill covers the same provisioning and recovery flow in either agent. Treat diagnostics as actionable only when the current change caused them; pre-existing noise on unrelated lines is outside scope.
+
+## Whole-repo scans (`scripts/glua-check.ps1`)
+
+`glua_ls` only analyzes files as they are opened or edited. To audit the whole repo at once, run `pwsh -File scripts/glua-check.ps1` - it provisions tooling on demand (no-op when present) and runs `glua_check --warnings-as-errors` against the workspace root. It takes no path filter, so it always scans everything; CI runs the same script. Useful after a fix ripples across the tree, or when picking the project up to surface latent issues the LSP hasn't opened yet. Count the diagnostics rather than trusting the exit code: `hint` sits below `--warnings-as-errors`, so a hint-level regression still prints `Check successful` and exits 0.
+
+**Local and CI can disagree, and CI is authoritative** - but `glua_check` itself is platform-consistent (verified against the Linux binary), so suspect a difference in *what is being analyzed* before suspecting the analyzer: a duplicate annotations copy on the library masks undeclared engine classnames locally, for instance. Declare those in `.luatypes` as `---@class <name> : Entity`. What does diverge is the generated hook catalogue, which resolves types through `glua_doc_cli` rather than `glua_check` - hence CI owning that file, and never regenerating it locally. Avoid a strict `---@class`/`---@type` on a *partial or reused literal*; use `table`/`table[]?` or a `--[[@as Class]]` cast instead.
+
+## Typing enforcement (`scripts/typing-check.ps1`)
+
+`glua_check` catches _wrong_ types but not _missing_ ones - an untyped param is a silent `any` it never flags. `Test-GmodTyping` (CI: `typing-check.yml`) closes that gap, failing the build on any of: an untyped param, annotation rot (a `---@param` for a param that no longer exists), a modeled function whose resolved return type contains `unknown`, a hook fire-site argument that resolves to `unknown`, or a `:CallHook`-style hook whose receiver resolves to `unknown` (so its "Fired on" column would render _Unknown_ - usually fixed with a `---@param self <class>` on the enclosing function). Satisfy it at the **source** - prefer a `---@param` / `---@return` / `---@class` annotation over a per-callsite `---@cast`, since annotations propagate to every caller. The only accepted escapes are explicit and greppable: `---@param x any` (a reviewed, genuine `any`), an `_` discard for a deliberately-unused arg, and a file-level `---@vendored` marker on third-party code.
+
+Where an addon fires its own hooks, callback payload params are typed by a generated `---@overload` catalogue (`scripts/generate-hook-types.ps1`, CI: `generate-hook-types.yml`) - do not hand-edit it; retype a payload at its `CallHook` / `hook.Run` site instead. Custom global-hook overloads are spliced into the provisioned `hook.lua` by `Initialize-GmodTools`, so after pulling a change to a generated fragment mid-session, re-run `scripts/install-tools.ps1` to re-sync it. In Claude Code, then run `/reload-plugins` to refresh the live types.
+
+## Before reporting a `glua_ls` bug
+
+The two gates disagree by design: `Test-GmodTyping` only asks whether a param is typed at all, which an `---@overload` match satisfies; `infer-unknown` additionally asks whether it was _declared_, which an overload match is not. So a hook callback can pass typing-check and still trip `infer-unknown` on values derived from its params - an explicit `---@param` above the `hook.Add` clears it. This hits stock GMod hooks too, not just generated catalogues.
+
+A committed `---@diagnostic disable` marks a genuine analyzer bug - it fired, and was suppressed. A `---@cast` / `---@type` / `--[[@as]]` frequently does not; it is often a redundant defensive leftover. Remove it in the real workspace and re-check before concluding anything - but **four** things read these annotations and only two of them run locally:
+
+- `glua_check` - **count the diagnostics, never the exit code**; `hint` sits below `--warnings-as-errors`, so a hint-level regression still prints `Check successful` and exits 0.
+- `Test-GmodTyping` - hook fire-site arguments `glua_check` never mentions.
+- the generated hook catalogue - it resolves `CallHook` / `hook.Run` argument types and only regenerates in CI, so deleting a cast that fed one has turned `main` red with no local signal at all.
+- a generated wiki - a `---@field` can decide a *published* type, and nothing gates it: the workflow regenerates and commits rather than failing on drift. One deletion downgraded a rendered `linked_portal_door` to `Entity` with both code gates green.
+
+`Test-GmodAnnotation` measures all four - it removes the annotation, re-measures each, restores, and reports which moved (an inline `--[[@as T]]` has its token stripped rather than its line deleted):
+
+```powershell
+pwsh -c ". ./scripts/bootstrap.ps1; Test-GmodAnnotation -RepoRoot . -Site 'lua/foo.lua:270'"
+```
+
+Suppressions tracking an upstream report carry a `glua_ls upstream:` comment with the issue URL, so grep that to find what to retire when one closes.
+
+Already investigated and **not** bugs, so do not re-derive them: `pcall` never narrows on `ok` (a limitation every Lua type system shares); `table.Copy` is genuinely generic, and its casts suppress `need-check-nil` because the return is honestly `T?`; `string.gmatch`'s bare `---@return function` makes a local `---@type fun(): string` a real tightening rather than a workaround; the undocumented Derma / `DModelPanel` getters are correctly omitted from the stubs; and a runtime-conditional `ENT.Base` (Wire mounted or not) cannot be resolved statically, though that no longer costs a suppression - wire came off the analysis surface and the symbols we use are declared instead.
+
+## Bumping the shared tooling
+
+Tool versions and this conventions block are pinned to a `gmod-addon-tools` tag. Bump the version constants in `gmod-addon-tools/src/install.ps1` (or edit the shared docs); merging to the module's `main` auto-cuts a new tag, and Renovate then raises a pin-bump PR here that regenerates the affected artifacts and runs GLua Check before it merges. CI pins the module by tag (the `ref:` in each workflow); a local sibling checkout uses whatever branch it is on, so keep it on the pinned tag to mirror CI exactly.
+
+<!-- <<< END GENERATED shared conventions <<< -->
