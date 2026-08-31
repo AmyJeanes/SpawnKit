@@ -34,7 +34,7 @@ The load-bearing gotchas live as comments beside the code they explain - the def
 
 ## Build / publish
 
-No local build step. CI (`.github/workflows/ci.yml`) runs GLua Check + Typing Check, then a beta Workshop publish on push to `main`; `release.yml` publishes stable on a GitHub release. Both publish paths dry-run until the Workshop items exist - set repo vars `BETA_WORKSHOP_ID` / `STABLE_WORKSHOP_ID` (and the shared Steam secrets) once created.
+No local build step. CI (`.github/workflows/ci.yml`) runs GLua Check + Typing Check on pull requests and pushes to `main`; there is no beta publication channel. Publishing a GitHub release triggers `release.yml`, which uploads the stable Workshop item using phone-gated Steam Guard MFA.
 
 <!-- >>> GENERATED shared conventions (gmod-addon-tools) - do not edit; regen: scripts/generate-agent-guidance.ps1 >>> -->
 
