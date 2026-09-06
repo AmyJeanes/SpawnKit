@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   publish:
-    uses: AmyJeanes/gmod-addon-tools/.github/workflows/publish-workshop.yml@3f5e394ee7d395ecf06091fba4a59ba1c2f6481b # v0.32.2
+    uses: AmyJeanes/gmod-addon-tools/.github/workflows/publish-workshop.yml@b5579ce3fd34924b6a578f35ea14943e198c222a # v0.33.3
     with:
       addon: "SpawnKit"
       workshop_id: ${{ vars.STABLE_WORKSHOP_ID }}
